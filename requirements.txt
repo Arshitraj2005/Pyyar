@@ -1,3 +1,2 @@
-flask
-requests
-ffmpeg-python
+Flask
+yt-dlp
