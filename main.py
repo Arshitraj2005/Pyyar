@@ -1,52 +1,55 @@
-import subprocess
-import threading
-from utils import download_drive_file
+import os, subprocess, signal, time
+from flask import Flask, request, jsonify
 from keep_alive import keep_alive
 
-VIDEO_DRIVE_ID = "1zOqir9W5hYTbHMAAolrs5Dh71XwZHX7l"
-AUDIO_DRIVE_ID = "1fO8xVEIKALIZAMMYcFEMQK4Rk0cFtBp6"
-STREAM_KEY = "2c4f-5sy5-q7tx-cz4t-0c8r"
+app = Flask(__name__)
+PROCESS_FILE = "/tmp/stream.pid"
 
-video_file = download_drive_file(VIDEO_DRIVE_ID, "video.mp4")
-audio_file = download_drive_file(AUDIO_DRIVE_ID, "audio.mp3")
+def is_running():
+    if not os.path.exists(PROCESS_FILE):
+        return False
+    try:
+        pid = int(open(PROCESS_FILE).read())
+        os.kill(pid, 0)
+        return True
+    except:
+        return False
 
-# ===== Video Loop Process =====
-video_process = subprocess.Popen([
-    "ffmpeg", "-stream_loop", "-1", "-i", video_file, "-c:v", "copy", "-an",
-    "-f", "mpegts", "video.ts"
-])
+@app.route("/start")
+def start():
+    if is_running():
+        return jsonify({"ok": False, "msg": "Already streaming"})
 
-# ===== Audio Process (dynamic) =====
-audio_process = None
-def play_audio(audio_file):
-    global audio_process
-    if audio_process:
-        audio_process.terminate()
-    audio_process = subprocess.Popen([
-        "ffmpeg", "-re", "-i", audio_file, "-c:a", "aac", "-f", "mpegts", "audio.ts"
-    ])
+    # Fixed user details
+    stream_key = "2c4f-5sy5-q7tx-cz4t-0c8r"
+    video_id = "1zOqir9W5hYTbHMAAolrs5Dh71XwZHX7l"
+    audio_id = "1fO8xVEIKALIZAMMYcFEMQK4Rk0cFtBp6"
 
-# ===== Merge Video + Audio → YouTube =====
-merge_process = subprocess.Popen([
-    "ffmpeg",
-    "-i", "video.ts",
-    "-i", "audio.ts",
-    "-c:v", "copy",
-    "-c:a", "aac",
-    "-f", "flv",
-    f"rtmp://a.rtmp.youtube.com/live2/{STREAM_KEY}"
-])
+    cmd = [
+        "python3", "stream.py",
+        "--stream-key", stream_key,
+        "--video-drive", video_id,
+        "--audio-drive", audio_id
+    ]
 
-# ===== Keep Audio Changing Example =====
-def audio_changer():
-    import time
-    while True:
-        # Update audio file dynamically from Drive
-        new_audio = download_drive_file("NEW_AUDIO_DRIVE_ID", "audio.mp3")
-        play_audio(new_audio)
-        time.sleep(3600)  # 1 hour baad next audio
+    proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
+    open(PROCESS_FILE, "w").write(str(proc.pid))
+    time.sleep(1)
+    return jsonify({"ok": True, "msg": "Started", "pid": proc.pid})
 
-threading.Thread(target=audio_changer).start()
+@app.route("/stop")
+def stop():
+    if not is_running():
+        return jsonify({"ok": False, "msg": "Not running"})
+    pid = int(open(PROCESS_FILE).read())
+    os.killpg(pid, signal.SIGTERM)
+    os.remove(PROCESS_FILE)
+    return jsonify({"ok": True, "msg": "Stopped"})
 
-# ===== Keep Server Alive for Render =====
-keep_alive()
+@app.route("/status")
+def status():
+    return jsonify({"running": is_running()})
+
+if __name__ == "__main__":
+    keep_alive()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
