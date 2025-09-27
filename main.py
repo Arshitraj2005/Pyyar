@@ -1,5 +1,5 @@
 import os, subprocess, signal, time
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from keep_alive import keep_alive
 
 app = Flask(__name__)
@@ -14,6 +14,10 @@ def is_running():
         return True
     except:
         return False
+
+@app.route("/")
+def home():
+    return "🚀 YouTube Stream Service is running! Use /start, /stop, /status"
 
 @app.route("/start")
 def start():
